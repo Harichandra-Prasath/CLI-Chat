@@ -84,3 +84,19 @@ func (s *Server) announce(message string, announcer *Client) {
 	}
 	s.lock.RUnlock()
 }
+
+func (s *Server) whisper(message string, sender *Client, reciever_name string) {
+	var reciver *Client
+	for _, client := range s.Clients {
+		if client.Details.Name == reciever_name {
+			reciver = client
+			break
+		}
+	}
+	fmt.Printf("%s:%s\n", sender.Details.Name, message)
+	if reciver != nil {
+		reciver.Conn.Write([]byte(fmt.Sprintf("%s whispered %s to you\n", sender.Details.Name, message)))
+	} else {
+		sender.Conn.Write([]byte("Sorry, No client with given username"))
+	}
+}
