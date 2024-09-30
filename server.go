@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 )
 
@@ -25,6 +26,8 @@ func GetServer(cfg *Config) *Server {
 }
 
 func (s *Server) Serve() {
+
+	fmt.Printf("Server is listening on localhost%s\n", s.Cfg.Addr)
 	l, err := net.Listen("tcp", s.Cfg.Addr)
 	if err != nil {
 		panic(err)
@@ -34,7 +37,9 @@ func (s *Server) Serve() {
 		conn, err := l.Accept()
 		if err != nil {
 			fmt.Println(err.Error())
+			continue
 		}
+		fmt.Println("Got a client connection at", conn.RemoteAddr().String())
 		go s.handleConn(conn.(*net.TCPConn))
 	}
 }
@@ -44,35 +49,44 @@ func (s *Server) handleConn(conn *net.TCPConn) {
 
 	conn.Write([]byte("Please give Client details in one line Json\n"))
 
-	det_buff := make([]byte, 56)
+	det_buff := make([]byte, 512)
 	n, err := conn.Read(det_buff)
 	if err != nil {
 		fmt.Println(err.Error())
+		return
 	}
+
 	det_buff = det_buff[:n-1]
 	err = json.Unmarshal(det_buff, &det)
 	if err != nil {
 		fmt.Println(err.Error())
+		conn.Write([]byte("Invalid Details\n"))
+		return
 	}
 
-	client := getClient(conn, &det)
+	client := getClient(conn, det)
 
 	s.lock.Lock()
 	s.Clients = append(s.Clients, client)
 	s.lock.Unlock()
 
+	conn.Write([]byte("You can announce or whisper messages now\n"))
+
 	for {
 		buff := make([]byte, 512)
-		_, err := client.Conn.Read(buff)
+		n, err := client.Conn.Read(buff)
 		if err != nil {
 			fmt.Println(err.Error())
+			continue
 		}
-		data := string(buff)
+		data := string(buff[:n])
 		s.handleMessage(client, data)
 	}
 }
 
-func (s *Server) announce(message string, announcer *Client) {
+func (s *Server) announce(_message []string, announcer *Client) {
+
+	message := strings.Join(_message, " ")
 	s.lock.RLock()
 	for _, client := range s.Clients {
 		if client.Details.Name != announcer.Details.Name {
@@ -85,7 +99,10 @@ func (s *Server) announce(message string, announcer *Client) {
 	s.lock.RUnlock()
 }
 
-func (s *Server) whisper(message string, sender *Client, reciever_name string) {
+func (s *Server) whisper(_message []string, sender *Client, reciever_name string) {
+
+	message := strings.Join(_message, " ")
+
 	var reciver *Client
 	for _, client := range s.Clients {
 		if client.Details.Name == reciever_name {
@@ -93,9 +110,8 @@ func (s *Server) whisper(message string, sender *Client, reciever_name string) {
 			break
 		}
 	}
-	fmt.Printf("%s:%s\n", sender.Details.Name, message)
 	if reciver != nil {
-		reciver.Conn.Write([]byte(fmt.Sprintf("%s whispered %s to you\n", sender.Details.Name, message)))
+		reciver.Conn.Write([]byte(fmt.Sprintf("%s whispered to you: %s\n", sender.Details.Name, message)))
 	} else {
 		sender.Conn.Write([]byte("Sorry, No client with given username"))
 	}
